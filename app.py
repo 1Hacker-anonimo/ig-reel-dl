@@ -1,35 +1,39 @@
-from flask import Flask, request, redirect
-import os
-import yt_dlp
+from flask import Flask, request, redirect, render_template_string
+import os, yt_dlp
 
 app = Flask(__name__)
 
-@app.route("/", methods=["GET", "POST"])
-def download():
-    # pega o URL do formulário ou da query-string
-    url = request.form.get("url") or request.args.get("url")
-    if not url:
-        return "Falta o parâmetro url", 400
+FORM = '''
+<form method="get">
+  Cole o link do reel: <input name="url" size="60">
+  <button type="submit">Baixar</button>
+</form>
+'''
 
-    # lê login/senha das variáveis de ambiente que você vai criar no Render
+@app.route("/", methods=["GET"])
+def index():
+    url = request.args.get("url")
+    if not url:                     # primeira vez: mostra o campo
+        return FORM
+
+    # --- daqui pra baixo igual ao código anterior ---
     username = os.getenv("IG_USER")
     password = os.getenv("IG_PASS")
     if not username or not password:
-        return "Configure as variáveis IG_USER e IG_PASS no painel do Render", 500
+        return "Configure IG_USER e IG_PASS no Render", 500
 
     opts = {
         "username": username,
         "password": password,
-        "format":   "best[ext=mp4]",
-        "quiet":    True,
+        "format": "best[ext=mp4]",
+        "quiet": True,
         "no_warnings": True
     }
 
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=False)   # só pega o link direto
-            video_url = info["url"]                        # URL do MP4
-            return redirect(video_url)                     # baixo direto no navegador
+            info = ydl.extract_info(url, download=False)
+            return redirect(info["url"])
     except Exception as e:
         return str(e), 400
 
