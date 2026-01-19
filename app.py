@@ -1,5 +1,9 @@
 from flask import Flask, request, Response, redirect, stream_with_context
-import os, yt_dlp, requests
+import os, yt_dlp, requests, logging
+from requests.exceptions import RequestException
+import yt_dlp.utils
+
+logging.basicConfig(level=logging.INFO)
 
 app = Flask(__name__)
 
@@ -85,15 +89,26 @@ def download():
             info = ydl.extract_info(url, download=False)
             video_url = info["url"]
             filename = f"{info['id']}.mp4"
+    except yt_dlp.utils.DownloadError as e:
+        logging.exception("yt-dlp falhou")
+        return f"Erro ao obter vídeo: {e}", 400
     except Exception as e:
-        return str(e), 400
+        logging.exception("Exceção geral ao extrair")
+        return f"Erro desconhecido: {e}", 500
 
     def generate():
-        with requests.get(video_url, stream=True) as r:
-            r.raise_for_status()
-            for chunk in r.iter_content(chunk_size8192):
-                if chunk:
-                    yield chunk
+        try:
+            with requests.get(video_url, stream=True, timeout=30) as r:
+                r.raise_for_status()
+                for chunk in r.iter_content(chunk_size=16*1024):
+                    if chunk:
+                        yield chunk
+        except RequestException as e:
+            logging.exception("Erro no stream")
+            return
+        except Exception:
+            logging.exception("Exceção geral no stream")
+            return
 
     return Response(
         stream_with_context(generate()),
