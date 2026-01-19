@@ -1,22 +1,15 @@
-from flask import Flask, request, redirect, render_template_string
+from flask import Flask, request, redirect, render_template   # <— acrescente render_template
 import os, yt_dlp
 
 app = Flask(__name__)
 
-FORM = '''
-<form method="get">
-  Cole o link do reel: <input name="url" size="60">
-  <button type="submit">Baixar</button>
-</form>
-'''
-
 @app.route("/", methods=["GET"])
 def index():
     url = request.args.get("url")
-    if not url:                     # primeira vez: mostra o campo
-        return FORM
+    if not url:                                # primeira vez: mostra a página bonita
+        return render_template("index.html")   # <— aqui usa o template
 
-    # --- daqui pra baixo igual ao código anterior ---
+    # ---- restante do código de download (não mexe) ----
     username = os.getenv("IG_USER")
     password = os.getenv("IG_PASS")
     if not username or not password:
