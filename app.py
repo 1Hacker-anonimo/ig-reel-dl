@@ -52,10 +52,15 @@ INDEX_PAGE = '''
     </div>
 
     <script>
-        const form  = document.getElementById('form');
-        const load  = document.getElementById('loader');
-        form.addEventListener('submit', () => load.classList.add('show'));
-    </script>
+const form = document.getElementById('form');
+const load = document.getElementById('loader');
+
+form.addEventListener('submit', () => {
+    load.classList.add('show');          // mostra o loader
+    setTimeout(() => load.classList.remove('show'), 1000); // some após 1 s
+});
+</script>
+
 </body>
 </html>
 '''
