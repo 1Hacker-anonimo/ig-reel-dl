@@ -1,15 +1,62 @@
-from flask import Flask, request, redirect, render_template   # <— acrescente render_template
+from flask import Flask, request, redirect
 import os, yt_dlp
 
 app = Flask(__name__)
 
+# ---------- HTML dark GLADIADOR ----------
+INDEX_PAGE = '''
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>GLADIADOR – InstaDown</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+head>
+<body>
+    <div class="card">
+        <h1>GLADIADOR</h1>
+        <p class="sub">Cole o link do Instagram e o vídeo baixa automaticamente.</p>
+
+        <form id="form" action="/" method="get">
+            <input id="url" name="url" type="url" placeholder="https://www.instagram.com/reel/..." required>
+            <button class="btn" type="submit">Baixar</button>
+        </form>
+
+        <div class="foot">
+            Feito por <strong>GLADIADOR</strong> – 2026
+        </div>
+    </div>
+
+    <!-- overlay de “baixando...” -->
+    <div id="loader" class="overlay">
+        <div class="spinner"></div>
+        <p>baixando...</p>
+    </div>
+
+    <script>
+        const form  = document.getElementById('form');
+        const input = document.getElementById('url');
+        const load  = document.getElementById('loader');
+
+        form.addEventListener('submit', () => load.classList.add('show'));
+        input.addEventListener('paste', () => {
+            setTimeout(() => {
+                load.classList.add('show');
+                form.submit();
+            }, 100);
+        });
+    </script>
+</body>
+</html>
+'''
+
 @app.route("/", methods=["GET"])
 def index():
     url = request.args.get("url")
-    if not url:                                # primeira vez: mostra a página bonita
-        return render_template("index.html")   # <— aqui usa o template
+    if not url:                 # primeira vez: só mostra a página
+        return INDEX_PAGE
 
-    # ---- restante do código de download (não mexe) ----
+    # ---------- download ----------
     username = os.getenv("IG_USER")
     password = os.getenv("IG_PASS")
     if not username or not password:
