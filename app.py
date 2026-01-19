@@ -187,23 +187,27 @@ def youtube():
     if not url or fmt not in ("mp4", "mp3"):
         return redirect("/")
 
-    ydl_opts = {
-        "format": "bestaudio/best" if fmt == "mp3" else "best[ext=mp4]",
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-        "outtmpl": "%(id)s.%(ext)s",
-    }
     if fmt == "mp3":
-        ydl_opts.update({
+        ydl_opts = {
+            "format": "bestaudio/best",
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            "outtmpl": "%(id)s.%(ext)s",
             "postprocessors": [{
-                "key": "FFmpegMuteAudio",
-            }, {
-                "key": "FFmpegConverter",
+                "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
                 "preferredquality": "192",
             }]
-        })
+        }
+    else:  # mp4
+        ydl_opts = {
+            "format": "best[ext=mp4]",
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            "outtmpl": "%(id)s.%(ext)s",
+        }
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -238,6 +242,7 @@ def youtube():
             "Content-Type": "audio/mpeg" if fmt == "mp3" else "video/mp4",
         }
     )
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
