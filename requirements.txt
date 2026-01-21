@@ -1,6 +1,7 @@
 Flask==2.3.3
 requests>=2.32
-yt-dlp-nightly
+yt-dlp>=2025.1.12
+
 
 
 
