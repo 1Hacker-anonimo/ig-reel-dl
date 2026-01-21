@@ -1,5 +1,6 @@
 Flask==2.3.3
+requests>=2.32
 yt-dlp>=2023.12.30
-requests
+
 
 
