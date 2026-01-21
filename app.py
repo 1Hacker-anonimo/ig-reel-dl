@@ -1,6 +1,5 @@
 app.py
-──────
-import os, re, json, requests, tempfile, mimetypes
+import os, re, json, requests
 from flask import Flask, request, Response, render_template_string, redirect, abort
 
 app = Flask(__name__)
