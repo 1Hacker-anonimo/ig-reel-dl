@@ -129,35 +129,36 @@ def username_from_url(url: str) -> str:
 
 def ig_stories_data(url_or_user: str):
     """
-    Baixa JSON de stories de perfil público.
+    Cookies salvo em cookies.txt (Netscape) evita 'login_required'.
     Retorna lista [{url, thumbnail, is_video}] ou dict {error}.
     """
     username = username_from_url(url_or_user)
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36 "
-                      "(KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36",
-        "Accept-Language": "pt-BR,pt=0.9",
-        "Accept": "*/*",
-        "X-IG-App-ID": "936619743392459",
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "cookiefile": "cookies.txt",          # <── usa seus cookies
+        "format": "best",
     }
-    s = requests.Session()
     try:
-        # 1) pega user_id
-        r = s.get(f"https://i.instagram.com/api/v1/users/web_profile_info/?username={username}",
-                  headers=headers, timeout=15)
-        if r.status_code == 404:
-            return {"error": "Perfil não existe"}
-        if r.status_code == 401:
-            return {"error": "login_required – troque de IP ou cookie"}
-        data = r.json()
-        user = data["data"]["user"]
-        if user["is_private"]:
-            return {"error": "Perfil privado – impossível baixar stories"}
-        user_id = user["id"]
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            # extrai ID do perfil
+            info = ydl.extract_info(f"https://www.instagram.com/{username}/", download=False)
+            user_id = info["id"]
 
-        # 2) pega stories
-        r = s.get(f"https://i.instagram.com/api/v1/feed/reels_media/?reel_ids={user_id}",
-                  headers=headers, timeout=15)
+        # agora pega os stories com os mesmos cookies
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36",
+            "Accept-Language": "pt-BR,pt=0.9",
+            "X-IG-App-ID": "936619743392459",
+            "Cookie": open("cookies.txt").read().replace("\n", "; "),  # envia cookies inline
+        }
+        r = requests.get(
+            f"https://i.instagram.com/api/v1/feed/reels_media/?reel_ids={user_id}",
+            headers=headers,
+            timeout=15,
+        )
         if r.status_code != 200 or not r.json().get("reels"):
             return []
         reel = r.json()["reels"][user_id]
@@ -174,8 +175,9 @@ def ig_stories_data(url_or_user: str):
             items.append({"id": media_id, "url": url, "is_video": is_video, "thumbnail": thumb})
         return items
     except Exception as e:
-        logging.exception("Erro stories")
+        logging.exception("Erro stories com cookies")
         return {"error": str(e)}
+
 
 # ---------- ROTAS ----------
 @app.route("/")
