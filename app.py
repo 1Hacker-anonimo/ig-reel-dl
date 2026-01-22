@@ -121,7 +121,7 @@ INDEX_PAGE = '''
 </html>
 '''
 
-# ---------- FUNÇÕES AUXILIARES ----------
+# ---------- FUNÇÕES # ---------- FUNÇÕES AUXILIARES ----------
 def story_raw(url: str) -> str:
     """Baixa o HTML da página do story."""
     headers = {
@@ -137,6 +137,9 @@ def extract_story_url(html: str) -> str:
     """Pega o .mp4 ou .jpg direto do window.__additionalData."""
     vid = re.search(r'"video_url":"(https://[^"]+)"', html)
     img = re.search(r'"image_url":"(https://[^"]+)"', html)
+    # Se nenhum der match, levanta ValueError
+    if not (vid or img):
+        raise ValueError("Nenhuma URL de mídia encontrada no HTML")
     url = (vid or img).group(1).replace("\\u0026", "&")
     return url
 
@@ -207,9 +210,12 @@ def story_dl():
     try:
         html = story_raw(url)
         media_url = extract_story_url(html)
+    except ValueError as e:
+        logging.exception("Story não encontrado")
+        return f"Story não encontrado ou perfil privado: {e}", 400
     except Exception as e:
         logging.exception("Erro ao extrair story")
-        return f"Story não encontrado ou perfil privado: {e}", 400
+        return f"Erro ao extrair story: {e}", 500
 
     # devolve o arquivo direto
     ext = "mp4" if "video" in media_url else "jpg"
