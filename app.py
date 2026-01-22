@@ -17,7 +17,7 @@ INDEX_PAGE = '''
     <style>
         *{margin:0;padding:0;box-sizing:border-box;font-family:Segoe UI,Roboto,Arial,sans-serif}
         body{background:#0a0a0a;color:#e0e0e0;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
-        .card{background:#111;border:1px solid #222;border-radius:12px;padding:40px 30px;max-width:420px;width:100%;text-align:center;box-shadow:0 0 25px #ff0044333}
+        .card{background:#111;border:1px solid #222;border-radius:12px;padding:40px 30px;max-width:420px;width:100%;text-align:center;box-shadow:0 0 25px #ff004433}
         h1{color:#ff0044;font-size:2.4rem;margin-bottom:12px;letter-spacing:1px;text-transform:uppercase}
         .sub{color:#aaa;font-size:1rem;margin-bottom:25px}
         form{display:flex;flex-direction:column;gap:15px}
@@ -122,61 +122,23 @@ INDEX_PAGE = '''
 '''
 
 # ---------- FUNÇÕES AUXILIARES ----------
-def username_from_url(url: str) -> str:
-    m = re.search(r"instagram\.com/([^/?]+)", url)
-    return m.group(1) if m else url.strip("/@ ")
-
-def ig_stories_data(url_or_user: str):
-    """
-    Cookies salvo em cookies.txt (Netscape) evita 'login_required'.
-    Retorna lista [{url, thumbnail, is_video}] ou dict {error}.
-    """
-    username = username_from_url(url_or_user)
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-        "cookiefile": "cookies.txt",          # <── usa seus cookies
-        "format": "best",
+def story_raw(url: str) -> str:
+    """Baixa o HTML da página do story."""
+    headers = {
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "cookie": open("cookies.txt").read().replace("\n", "; ")
     }
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # extrai ID do perfil
-            info = ydl.extract_info(f"https://www.instagram.com/{username}/", download=False)
-            user_id = info["id"]
+    r = requests.get(url, headers=headers, timeout=15)
+    r.raise_for_status()
+    return r.text
 
-        # agora pega os stories com os mesmos cookies
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36 "
-                          "(KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36",
-            "Accept-Language": "pt-BR,pt=0.9",
-            "X-IG-App-ID": "936619743392459",
-            "Cookie": open("cookies.txt").read().replace("\n", "; "),  # envia cookies inline
-        }
-        r = requests.get(
-            f"https://i.instagram.com/api/v1/feed/reels_media/?rel_ids={user_id}",
-            headers=headers,
-            timeout=15,
-        )
-        if r.status_code != 200 or not r.json().get("reels"):
-            return []
-        reel = r.json()["reels"][user_id]
-        items = []
-        for m in reel.get("items", []):
-            media_id = m["id"]
-            is_video = m["media_type"] == 2
-            if is_video:
-                url = m["video_versions"][0]["url"]
-                thumb = m.get("image_versions2",  {}).get("candidates", [{}])[0].get("url", "")
-            else:
-                url = m["image_versions2"]["candidates"][0]["url"]
-                thumb = url
-            items.append({"id": media_id, "url": url, "is_video": is_video, "thumbnail": thumb})
-        return items
-    except Exception as e:
-        logging.exception("Erro stories com cookies")
-        return {"error": str(e)}
-
+def extract_story_url(html: str) -> str:
+    """Pega o .mp4 ou .jpg direto do window.__additionalData."""
+    vid = re.search(r'"video_url":"(https://[^"]+)"', html)
+    img = re.search(r'"image_url":"(https://[^"]+)"', html)
+    url = (vid or img).group(1).replace("\\u0026", "&")
+    return url
 
 # ---------- ROTAS ----------
 @app.route("/")
@@ -237,56 +199,29 @@ def download():
         }
     )
 
-@app.route("/story")       # NOVA ROTA Stories
+@app.route("/story")       # Instagram Stories (bypass HTML)
 def story_dl():
-    url_or_user = request.args.get("url")
-    if not url_or_user:
+    url = request.args.get("url")
+    if not url:
         return redirect("/")
-    data = ig_stories_data(url_or_user)
-    if isinstance(data, dict) and data.get("error"):
-        return data["error"], 400
-    if not data:
-        return "Nenhum story encontrado.", 404
+    try:
+        html = story_raw(url)
+        media_url = extract_story_url(html)
+    except Exception as e:
+        logging.exception("Erro ao extrair story")
+        return f"Story não encontrado ou perfil privado: {e}", 400
 
-    # monta página simples com os stories
-    cards = "\n".join(
-        f"""
-        <div class="card mb-3" style="max-width:400px;margin:auto">
-            <img src="{s['thumbnail']}" class="card-img-top">
-            <div class="card-body text-center">
-                <span class="badge bg-secondary {'Vídeo' if s['is_video'] else 'Foto'}</span>
-                <a href="{s['url']}" class="btn btn-download mt-2" download>Baixar</a>
-            </div>
-        </div>
-        """
-        for s in data
+    # devolve o arquivo direto
+    ext = "mp4" if "video" in media_url else "jpg"
+    filename = f"story.{ext}"
+    r = requests.get(media_url, stream=True, timeout=30)
+    return Response(
+        stream_with_context(r.iter_content(chunk_size=16*1024)),
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+            "Content-Type": "video/mp4" if ext == "mp4" else "image/jpeg",
+        }
     )
-    html = f"""
-    <!doctype html>
-    <html lang="pt-BR" data-bs-theme="dark">
-    <head>
-      <meta charset="utf-8">
-      <title>Stories – GLADIADOR</title>
-      <meta name="viewport" content="width=device-width, initial-scale=1">
-      <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-      <style>
-        body{{background:#111;color:#e0e0e0}}
-        .btn-download{{background:#ff0044;border:none;color:#fff}}
-        .btn-download:hover{{background:#e6003d}}
-      </style>
-    </head>
-    <body>
-      <div class="container py-4">
-        <h4 class="text-center mb-4">Stories</h4>
-        {cards}
-        <div class="text-center mt-4">
-          <a href="/" class="btn btn-download">Voltar</a>
-        </div>
-      </div>
-    </body>
-    </html>
-    """
-    return html
 
 @app.route("/yt")          # YouTube (vídeo ou mp3)
 def youtube():
@@ -307,7 +242,7 @@ def youtube():
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
                 "preferredquality": "192",
-             }]
+            }]
         })
 
     try:
@@ -346,4 +281,3 @@ def youtube():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
-
