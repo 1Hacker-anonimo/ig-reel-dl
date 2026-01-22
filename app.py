@@ -1,7 +1,6 @@
 from flask import Flask, request, Response, redirect, stream_with_context
-import os, yt_dlp, requests, logging, re
+import os, requests, logging, re
 from requests.exceptions import RequestException
-import yt_dlp.utils
 
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
@@ -32,7 +31,6 @@ INDEX_PAGE = '''
         @keyframes spin{to{transform:rotate(360deg)}}
         .overlay p{margin-top:15px;color:#ff0044;font-weight:bold}
 
-        /* -- menu hamburger -- */
         .menu-icon{position:fixed;top:20px;left:20px;cursor:pointer;z-index:1001}
         .menu-icon span{display:block;width:28px;height:3px;background:#ff0044;margin:6px 0;transition:.3s}
         .side-panel{position:fixed;top:0;left:-50%;width:50%;height:100%;background:#111;border-right:1px solid #222;padding:30px;overflow-y:auto;transition:left .3s;z-index:1000}
@@ -46,22 +44,18 @@ INDEX_PAGE = '''
 </head>
 <body>
 
-    <!-- ícone hambúrguer -->
     <div class="menu-icon" onclick="togglePanel()">
         <span></span><span></span><span></span>
     </div>
 
-    <!-- painel lateral -->
     <div id="sidePanel" class="side-panel">
         <h2>TikTok Sem Marca d'Água</h2>
-        <p>Copie o link do vídeo e clique em baixar.</p>
         <form action="/story" method="get">
             <input name="url" type="url" placeholder="https://www.tiktok.com/..." required>
             <button class="btn" type="submit">Baixar TikTok</button>
         </form>
 
         <h2>YouTube</h2>
-        <p>Cole o link do vídeo e escolha o formato.</p>
         <form id="ytForm">
             <input id="ytUrl" type="url" placeholder="https://youtu.be/..." required>
             <button class="btn" type="button" onclick="downloadYt('mp4')">Vídeo MP4</button>
@@ -69,7 +63,6 @@ INDEX_PAGE = '''
         </form>
     </div>
 
-    <!-- conteúdo principal -->
     <div class="card">
         <h1>GLADIADOR</h1>
         <p class="sub">Cole o link do Instagram e o vídeo baixa automaticamente.</p>
@@ -82,7 +75,6 @@ INDEX_PAGE = '''
         <div class="foot">Feito por <strong>GLADIADOR</strong> – 2026</div>
     </div>
 
-    <!-- loader -->
     <div id="loader" class="overlay">
         <div class="spinner"></div>
         <p>baixando...</p>
@@ -99,10 +91,8 @@ INDEX_PAGE = '''
             setTimeout(() => l.classList.remove('show'), 1000);
         }
 
-        // forms normais
         document.getElementById('form').addEventListener('submit', showLoader);
 
-        // youtube
         function downloadYt(fmt){
             const url = document.getElementById('ytUrl').value.trim();
             if(!url) return alert('Cole um link do YouTube.');
@@ -114,12 +104,36 @@ INDEX_PAGE = '''
 </html>
 '''
 
+# ---------- TIKTOK SEM MARCA ----------
+API_BASE = "https://api.snaptik.app/v1"     # endpoint público sem chave
+
+def extract_video_id(url: str) -> str:
+    """Retorna o ID numérico de qualquer URL curta ou completa."""
+    m = re.search(r'(\d{17,20})', url)
+    if not m:
+        raise ValueError("ID do vídeo não encontrado na URL")
+    return m.group(1)
+
+def tiktok_nowm_url(video_id: str) -> str:
+    """Acessa API pública e devolve link direto sem watermark."""
+    r = requests.post(
+        f"{API_BASE}/info",
+        json={"url": f"https://www.tiktok.com/video/{video_id}"},
+        timeout=15,
+        headers={"user-agent": "Mozilla/5.0"},
+    )
+    r.raise_for_status()
+    data = r.json()
+    if data.get("status") != "ok":
+        raise ValueError(data.get("msg", "Erro desconhecido na API"))
+    return data["video"]["noWatermark"]        # link CDN sem logo
+
 # ---------- ROTAS ----------
 @app.route("/")
 def home():
     return INDEX_PAGE
 
-@app.route("/dl")          # Instagram (feed, reel, stories)
+@app.route("/dl")          # Instagram
 def download():
     url = request.args.get("url")
     if not url:
@@ -130,6 +144,7 @@ def download():
     if not username or not password:
         return "Configure IG_USER e IG_PASS no Render", 500
 
+    import yt_dlp
     ydl_opts = {
         "username": username,
         "password": password,
@@ -144,12 +159,9 @@ def download():
             info = ydl.extract_info(url, download=False)
             video_url = info["url"]
             filename = f"{info['id']}.mp4"
-    except yt_dlp.utils.DownloadError as e:
-        logging.exception("yt-dlp falhou")
-        return f"Erro ao obter vídeo: {e}", 400
     except Exception as e:
-        logging.exception("Exceção geral ao extrair")
-        return f"Erro desconhecido: {e}", 500
+        logging.exception("IG")
+        return f"Erro ao obter vídeo: {e}", 400
 
     def generate():
         try:
@@ -159,12 +171,8 @@ def download():
                     if chunk:
                         yield chunk
         except RequestException:
-            logging.exception("Erro no stream")
+            logging.exception("stream IG")
             return
-        except Exception:
-            logging.exception("Exceção geral no stream")
-            return
-
     return Response(
         stream_with_context(generate()),
         headers={
@@ -173,68 +181,41 @@ def download():
         }
     )
 
-# ---------- TIKTOK SEM MARCA D’ÁGUA ----------
-@app.route("/story")       # agora é TikTok
+@app.route("/story")       # TikTok Sem Marca
 def tiktok_dl():
     url = request.args.get("url")
     if not url:
         return redirect("/")
-
-    # yt-dlp já pega o vídeo SEM watermark automaticamente
-    ydl_opts = {
-        "format": "best[ext=mp4]",
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-    }
-
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            video_url = info["url"]
-            filename = f"{info['id']}.mp4"
-    except yt_dlp.utils.DownloadError as e:
-        logging.exception("yt-dlp TikTok falhou")
-        return f"Erro ao obter vídeo: {e}", 400
+        video_id = extract_video_id(url)
+        video_url = tiktok_nowm_url(video_id)
     except Exception as e:
-        logging.exception("Exceção geral TikTok")
-        return f"Erro desconhecido: {e}", 500
+        logging.exception("TikTok")
+        return f"Erro ao obter vídeo: {e}", 400
 
-    def generate():
-        try:
-            with requests.get(video_url, stream=True, timeout=30) as r:
-                r.raise_for_status()
-                for chunk in r.iter_content(chunk_size=16*1024):
-                    if chunk:
-                        yield chunk
-        except RequestException:
-            logging.exception("Erro no stream TikTok")
-            return
-        except Exception:
-            logging.exception("Exceção geral stream TikTok")
-            return
-
+    filename = f"{video_id}.mp4"
+    r = requests.get(video_url, stream=True, timeout=30)
     return Response(
-        stream_with_context(generate()),
+        stream_with_context(r.iter_content(chunk_size=16*1024)),
         headers={
             "Content-Disposition": f"attachment; filename={filename}",
             "Content-Type": "video/mp4",
         }
     )
 
-@app.route("/yt")          # YouTube (vídeo ou mp3)
+@app.route("/yt")          # YouTube
 def youtube():
     url = request.args.get("url")
-    fmt = request.args.get("fmt")          # mp4 ou mp3
+    fmt = request.args.get("fmt")
     if not url or fmt not in ("mp4", "mp3"):
         return redirect("/")
 
+    import yt_dlp
     ydl_opts = {
         "outtmpl": "static/%(title)s.%(ext)s",
         "cookiefile": "cookies.txt",
-        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "user_agent": "Mozilla/5.0",
     }
-
     if fmt == "mp3":
         ydl_opts.update({
             "postprocessors": [{
@@ -249,12 +230,9 @@ def youtube():
             info = ydl.extract_info(url, download=False)
             media_url = info["url"]
             filename = f"{info['id']}.{fmt}"
-    except yt_dlp.utils.DownloadError as e:
-        logging.exception("yt-dlp YouTube falhou")
-        return f"Erro ao obter mídia: {e}", 400
     except Exception as e:
-        logging.exception("Exceção geral YouTube")
-        return f"Erro desconhecido: {e}", 500
+        logging.exception("YT")
+        return f"Erro ao obter mídia: {e}", 400
 
     def generate():
         try:
@@ -264,12 +242,8 @@ def youtube():
                     if chunk:
                         yield chunk
         except RequestException:
-            logging.exception("Erro no stream YouTube")
+            logging.exception("stream YT")
             return
-        except Exception:
-            logging.exception("Exceção geral stream YouTube")
-            return
-
     return Response(
         stream_with_context(generate()),
         headers={
@@ -280,3 +254,4 @@ def youtube():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
+
